@@ -1316,6 +1316,7 @@ int clusterStartHandshake(char *ip, int port, int cport) {
             norm_ip,NET_IP_STR_LEN);
 
     if (clusterHandshakeInProgress(norm_ip,port,cport)) {
+        // 已经存在了，就不继续了
         errno = EAGAIN;
         return 0;
     }
@@ -1323,7 +1324,7 @@ int clusterStartHandshake(char *ip, int port, int cport) {
     /* Add the node with a random address (NULL as first argument to
      * createClusterNode()). Everything will be fixed during the
      * handshake. */
-    n = createClusterNode(NULL,CLUSTER_NODE_HANDSHAKE|CLUSTER_NODE_MEET);
+    n = createClusterNode(NULL, CLUSTER_NODE_HANDSHAKE|CLUSTER_NODE_MEET);
     memcpy(n->ip,norm_ip,sizeof(n->ip));
     n->port = port;
     n->cport = cport;
@@ -2411,6 +2412,7 @@ void clusterSendPing(clusterLink *link, int type) {
 
     /* Populate the gossip fields */
     int maxiterations = wanted*3;
+    // gossip每次不需要全部节点都发一遍
     while(freshnodes > 0 && gossipcount < wanted && maxiterations--) {
         dictEntry *de = dictGetRandomKey(server.cluster->nodes);
         clusterNode *this = dictGetVal(de);
@@ -2435,6 +2437,7 @@ void clusterSendPing(clusterLink *link, int type) {
         }
 
         /* Do not add a node we already have. */
+        // 已经在gossip中的，就不要继续了
         if (clusterNodeIsInGossipSection(hdr,gossipcount,this)) continue;
 
         /* Add it */
@@ -3362,6 +3365,9 @@ void clusterCron(void) {
     /* Check if we have disconnected nodes and re-establish the connection.
      * Also update a few stats while we are here, that can be used to make
      * better decisions in other part of the code. */
+    /*
+        没有建立gossip接口的，都会给每个点随机的发送几个自己知道的节点信息
+    */
     di = dictGetSafeIterator(server.cluster->nodes);
     server.cluster->stats_pfail_nodes = 0;
     while((de = dictNext(di)) != NULL) {
@@ -3381,6 +3387,7 @@ void clusterCron(void) {
             continue;
         }
 
+        // 只针对没有建立link的
         if (node->link == NULL) {
             int fd;
             mstime_t old_ping_sent;
