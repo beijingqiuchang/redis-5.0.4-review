@@ -1911,13 +1911,13 @@ typedef struct clusterManagerNode {
     time_t ping_sent;
     time_t ping_recv;
     int flags;
-    list *flags_str; /* Flags string representations */
+    list *flags_str; /* Flags string representations */  // 标志，myself,master
     sds replicate;  /* Master ID if node is a slave */
     int dirty;      /* Node has changes that can be flushed */
-    uint8_t slots[CLUSTER_MANAGER_SLOTS];
-    int slots_count;
+    uint8_t slots[CLUSTER_MANAGER_SLOTS];  // 支持哪些slot，哪些就是1
+    int slots_count;    // 支持的slot个数
     int replicas_count;
-    list *friends;
+    list *friends;  // 本集群的其他节点
     sds *migrating; /* An array of sds where even strings are slots and odd
                      * strings are the destination node IDs. */
     sds *importing; /* An array of sds where even strings are slots and odd
@@ -3166,6 +3166,8 @@ static void clusterManagerWaitForClusterJoin(void) {
 static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
                                       char **err)
 {
+
+    // 获取集群中其他点存储的集群信息
     redisReply *reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER NODES");
     int success = 1;
     *err = NULL;
@@ -3174,11 +3176,20 @@ static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
         goto cleanup;
     }
     int getfriends = (opts & CLUSTER_MANAGER_OPT_GETFRIENDS);
+
+    /* 返回数据格式如下：
+    4847ec992e1b70ae45ef856af12d9d7d98e2664a 127.0.0.1:7000@17000 myself,master - 0 1556617558000 1 connected 0-5460
+    8be987a72e798c4ae3ca095d90588d7c71aeda65 127.0.0.1:7002@17002 master - 0 1556617560000 3 connected 10923-16383
+    db0e71b8f1cc1568f04d2e885c64f575fcb5832f 127.0.0.1:7001@17001 master - 0 1556617558582 2 connected 5461-10922
+    */
+
     char *lines = reply->str, *p, *line;
     while ((p = strstr(lines, "\n")) != NULL) {
         *p = '\0';
         line = lines;
         lines = p + 1;
+
+        // line = 4847ec992e1b70ae45ef856af12d9d7d98e2664a 127.0.0.1:7000@17000 myself,master - 0 1556617558000 1 connected 0-5460
         char *name = NULL, *addr = NULL, *flags = NULL, *master_id = NULL,
              *ping_sent = NULL, *ping_recv = NULL, *config_epoch = NULL,
              *link_status = NULL;
@@ -3189,6 +3200,11 @@ static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
             char *token = line;
             line = p + 1;
             switch(i++){
+            /*
+            解析完，如下：
+                    name                                  addr                flags     masterid   ping_sent    ping_recv  config_epoch  link-stated   slot
+            4847ec992e1b70ae45ef856af12d9d7d98e2664a 127.0.0.1:7000@17000 myself,master    -           0      1556617558000      1       connected     0-5460
+            */
             case 0: name = token; break;
             case 1: addr = token; break;
             case 2: flags = token; break;
@@ -3206,11 +3222,13 @@ static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
         }
         int myself = (strstr(flags, "myself") != NULL);
         clusterManagerNode *currentNode = NULL;
+        // 处理自己的情况
         if (myself) {
             node->flags |= CLUSTER_MANAGER_FLAG_MYSELF;
             currentNode = node;
             clusterManagerNodeResetSlots(node);
             if (i == 8) {
+                // 这里剩余的就是slot信息
                 int remaining = strlen(line);
                 while (remaining > 0) {
                     p = strchr(line, ' ');
@@ -3302,6 +3320,7 @@ static int clusterManagerNodeLoadInfo(clusterManagerNode *node, int opts,
             freeClusterManagerNodeFlags(currentNode->flags_str);
         currentNode->flags_str = listCreate();
         int flag_len;
+        // falgs: myself,master 或者 master
         while ((flag_len = strlen(flags)) > 0) {
             sds flag = NULL;
             char *fp = strchr(flags, ',');
@@ -4598,13 +4617,16 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
             return 0;
         }
         char *err = NULL;
+        // 获取对方是不是集群
         if (!clusterManagerNodeIsCluster(node, &err)) {
+            // 不是集群，失败
             clusterManagerPrintNotClusterNodeError(node, err);
             if (err) zfree(err);
             freeClusterManagerNode(node);
             return 0;
         }
         err = NULL;
+        // 获取集群中的每个节点信息
         if (!clusterManagerNodeLoadInfo(node, 0, &err)) {
             if (err) {
                 CLUSTER_MANAGER_PRINT_REPLY_ERROR(node, err);
@@ -4625,6 +4647,7 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
     int node_len = cluster_manager.nodes->len;
     int replicas = config.cluster_manager_command.replicas;
     int masters_count = CLUSTER_MANAGER_MASTERS_COUNT(node_len, replicas);
+    // master的个数要小于3
     if (masters_count < 3) {
         clusterManagerLogErr(
             "*** ERROR: Invalid configuration for cluster creation.\n"
@@ -4639,8 +4662,8 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
                           "on %d nodes...\n", node_len);
     int interleaved_len = 0, ip_count = 0;
     clusterManagerNode **interleaved = zcalloc(node_len*sizeof(**interleaved));
-    char **ips = zcalloc(node_len * sizeof(char*));
-    clusterManagerNodeArray *ip_nodes = zcalloc(node_len * sizeof(*ip_nodes));
+    char **ips = zcalloc(node_len * sizeof(char*));  // 每个集群节点的ip
+    clusterManagerNodeArray *ip_nodes = zcalloc(node_len * sizeof(*ip_nodes));  // ip下挂的所有节点
     listIter li;
     listNode *ln;
     listRewind(cluster_manager.nodes, &li);
@@ -4754,6 +4777,7 @@ assign_replicas:
         while ((ln = listNext(&li)) != NULL) {
             clusterManagerNode *node = ln->value;
             char *err = NULL;
+            // CLUSTER REPLICATE %
             int flushed = clusterManagerFlushNodeConfig(node, &err);
             if (!flushed && node->dirty && !node->replicate) {
                 if (err != NULL) {
