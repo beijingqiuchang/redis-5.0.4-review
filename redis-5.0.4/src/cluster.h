@@ -275,7 +275,7 @@ typedef struct {
     uint16_t flags;      /* Sender node flags */
     unsigned char state; /* Cluster state from the POV of the sender */
     unsigned char mflags[3]; /* Message flags: CLUSTERMSG_FLAG[012]_... */
-    union clusterMsgData data;
+    union clusterMsgData data;  // 发送的数据
 } clusterMsg;
 
 #define CLUSTERMSG_MIN_LEN (sizeof(clusterMsg)-sizeof(union clusterMsgData))

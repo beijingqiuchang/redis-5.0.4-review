@@ -236,7 +236,7 @@ struct sentinelState {
     dict *masters;      /* Dictionary of master sentinelRedisInstances.
                            Key is the instance name, value is the
                            sentinelRedisInstance structure pointer. */
-    int tilt;           /* Are we in TILT mode? */
+    int tilt;           /* Are we in TILT mode? */  // 此模式说明服务非正常工作，需要等待
     int running_scripts;    /* Number of scripts in execution right now. */
     mstime_t tilt_start_time;       /* When TITL started. */
     mstime_t previous_time;         /* Last time we ran the time handler. */
@@ -4500,6 +4500,7 @@ void sentinelCheckTiltCondition(void) {
 }
 
 void sentinelTimer(void) {
+    // 先判断整体是否处于正常的工作状态
     sentinelCheckTiltCondition();
     sentinelHandleDictOfRedisInstances(sentinel.masters);
     sentinelRunPendingScripts();

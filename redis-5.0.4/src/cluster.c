@@ -883,6 +883,7 @@ void freeClusterNode(clusterNode *n) {
 }
 
 /* Add a node to the nodes hash table */
+// 把节点加入到server.cluster->nodes中，会有时间任务定期处理这些节点
 int clusterAddNode(clusterNode *node) {
     int retval;
 
@@ -1337,7 +1338,7 @@ int clusterStartHandshake(char *ip, int port, int cport) {
  * by the caller, not in the content of the gossip section, but in the
  * length. */
 void clusterProcessGossipSection(clusterMsg *hdr, clusterLink *link) {
-    uint16_t count = ntohs(hdr->count);
+    uint16_t count = ntohs(hdr->count);  // 发送了几个gossip节点
     clusterMsgDataGossip *g = (clusterMsgDataGossip*) hdr->data.ping.gossip;
     clusterNode *sender = link->node ? link->node : clusterLookupNode(hdr->sender);
 
@@ -1357,6 +1358,7 @@ void clusterProcessGossipSection(clusterMsg *hdr, clusterLink *link) {
             sdsfree(ci);
         }
 
+        // g指向的就是每一个节点
         /* Update our state accordingly to the gossip sections */
         node = clusterLookupNode(g->nodename);
         if (node) {
@@ -1699,11 +1701,13 @@ int clusterProcessPacket(clusterLink *link) {
     }
 
     /* Check if the sender is a known node. */
+    // sender为发送节点的name
     sender = clusterLookupNode(hdr->sender);
     if (sender && !nodeInHandshake(sender)) {
         /* Update our curretEpoch if we see a newer epoch in the cluster. */
         senderCurrentEpoch = ntohu64(hdr->currentEpoch);
         senderConfigEpoch = ntohu64(hdr->configEpoch);
+        // 更新自己的epoch
         if (senderCurrentEpoch > server.cluster->currentEpoch)
             server.cluster->currentEpoch = senderCurrentEpoch;
         /* Update the sender configEpoch if it is publishing a newer one. */
@@ -1717,6 +1721,7 @@ int clusterProcessPacket(clusterLink *link) {
         sender->repl_offset_time = mstime();
         /* If we are a slave performing a manual failover and our master
          * sent its offset while already paused, populate the MF state. */
+       // 如果是从
         if (server.cluster->mf_end &&
             nodeIsSlave(myself) &&
             myself->slaveof == sender &&
@@ -1767,7 +1772,7 @@ int clusterProcessPacket(clusterLink *link) {
          * resolved when we'll receive PONGs from the node. */
         if (!sender && type == CLUSTERMSG_TYPE_MEET) {
             clusterNode *node;
-
+            // 把发送者也加入到队列中
             node = createClusterNode(NULL,CLUSTER_NODE_HANDSHAKE);
             nodeIp2String(node->ip,link,hdr->myip);
             node->port = ntohs(hdr->port);
@@ -1779,6 +1784,7 @@ int clusterProcessPacket(clusterLink *link) {
         /* If this is a MEET packet from an unknown node, we still process
          * the gossip section here since we have to trust the sender because
          * of the message type. */
+         // 不仅仅处理发送者，还要把发送者发来的其他节点也要处理
         if (!sender && type == CLUSTERMSG_TYPE_MEET)
             clusterProcessGossipSection(hdr,link);
 
@@ -2348,6 +2354,7 @@ void clusterSetGossipEntry(clusterMsg *hdr, int i, clusterNode *n) {
 
 /* Send a PING or PONG packet to the specified node, making sure to add enough
  * gossip informations. */
+// 发送gossip层的心跳，每次都发送一些节点信息
 void clusterSendPing(clusterLink *link, int type) {
     unsigned char *buf;
     clusterMsg *hdr;

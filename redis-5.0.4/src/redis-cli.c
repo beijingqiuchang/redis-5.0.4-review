@@ -4593,12 +4593,12 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
         char *ip = addr;
         int port = atoi(++c);
         clusterManagerNode *node = clusterManagerNewNode(ip, port);
-        if (!clusterManagerNodeConnect(node)) {
+        if (!clusterManagerNodeConnect(node)) {  // 链接redis
             freeClusterManagerNode(node);
             return 0;
         }
         char *err = NULL;
-        if (!clusterManagerNodeIsCluster(node, &err)) {
+        if (!clusterManagerNodeIsCluster(node, &err)) {  // 节点都必须开启cluster模式
             clusterManagerPrintNotClusterNodeError(node, err);
             if (err) zfree(err);
             freeClusterManagerNode(node);
@@ -7060,7 +7060,7 @@ int main(int argc, char **argv) {
     parseEnv();
 
     /* Cluster Manager mode */
-    if (CLUSTER_MANAGER_MODE()) {
+    if (CLUSTER_MANAGER_MODE()) {  // cmd的name不为空
         clusterManagerCommandProc *proc = validateClusterManagerCommand();
         if (!proc) {
             sdsfree(config.hostip);
