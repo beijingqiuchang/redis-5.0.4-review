@@ -4599,6 +4599,7 @@ cluster_manager_err:
 static int clusterManagerCommandCreate(int argc, char **argv) {
     int i, j, success = 1;
     cluster_manager.nodes = listCreate();
+    // 解析每一个cluster的节点
     for (i = 0; i < argc; i++) {
         char *addr = argv[i];
         char *c = strrchr(addr, '@');
@@ -4627,6 +4628,7 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
         }
         err = NULL;
         // 获取集群中的每个节点信息
+        // 获取每个节点内部的集群信息，把这个节点所在集群的其他节点加入到friend中
         if (!clusterManagerNodeLoadInfo(node, 0, &err)) {
             if (err) {
                 CLUSTER_MANAGER_PRINT_REPLY_ERROR(node, err);
@@ -4636,12 +4638,14 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
             return 0;
         }
         err = NULL;
-        if (!clusterManagerNodeIsEmpty(node, &err)) {
+        if (!clusterManagerNodeIsEmpty(node, &err)) {  // 节点必须不在某一个集群里才可以
             clusterManagerPrintNotEmptyNodeError(node, err);
             if (err) zfree(err);
             freeClusterManagerNode(node);
             return 0;
         }
+
+        // 把节点加入到cluster_manager.nodes中
         listAddNodeTail(cluster_manager.nodes, node);
     }
     int node_len = cluster_manager.nodes->len;
@@ -4663,7 +4667,10 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
     int interleaved_len = 0, ip_count = 0;
     clusterManagerNode **interleaved = zcalloc(node_len*sizeof(**interleaved));
     char **ips = zcalloc(node_len * sizeof(char*));  // 每个集群节点的ip
-    clusterManagerNodeArray *ip_nodes = zcalloc(node_len * sizeof(*ip_nodes));  // ip下挂的所有节点
+
+    // 结构如下：
+    // ip_nodes[0]节点下，会挂着全部ip一样的节点
+    clusterManagerNodeArray *ip_nodes = zcalloc(node_len * sizeof(*ip_nodes));  // 每个ip下面的有几个节点
     listIter li;
     listNode *ln;
     listRewind(cluster_manager.nodes, &li);
@@ -4685,9 +4692,12 @@ static int clusterManagerCommandCreate(int argc, char **argv) {
             clusterManagerNodeArrayInit(node_array, node_len);
         clusterManagerNodeArrayAdd(node_array, n);
     }
+
+    // 每个ip下，都要取一个节点
     while (interleaved_len < node_len) {
         for (i = 0; i < ip_count; i++) {
             clusterManagerNodeArray *node_array = &(ip_nodes[i]);
+            // 如果这个ip下的节点个数大于0
             if (node_array->count > 0) {
                 clusterManagerNode *n = NULL;
                 clusterManagerNodeArrayShift(node_array, &n);
@@ -4729,7 +4739,7 @@ assign_replicas:
     for (i = 0; i < masters_count; i++) {
         clusterManagerNode *master = masters[i];
         int assigned_replicas = 0;
-        while (assigned_replicas < replicas) {
+        while (assigned_replicas < replicas) {  // 根据配置的副本个数，进行匹配
             if (available_count == 0) break;
             clusterManagerNode *found = NULL, *slave = NULL;
             int firstNodeIdx = -1;
@@ -4772,6 +4782,8 @@ assign_replicas:
     }
     clusterManagerOptimizeAntiAffinity(ip_nodes, ip_count);
     clusterManagerShowNodes();
+
+    // 开始执行命令了
     if (confirmWithYes("Can I set the above configuration?")) {
         listRewind(cluster_manager.nodes, &li);
         while ((ln = listNext(&li)) != NULL) {
