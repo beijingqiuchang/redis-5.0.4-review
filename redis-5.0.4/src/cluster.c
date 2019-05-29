@@ -4255,6 +4255,8 @@ NULL
             cport = port + CLUSTER_PORT_INCR;
         }
 
+        // 与节点握手，并把节点加入到 server.cluster->nodes
+        // 后面会有clusterCron定时任务，处理这些节点
         if (clusterStartHandshake(c->argv[2]->ptr,port,cport) == 0 &&
             errno == EINVAL)
         {
