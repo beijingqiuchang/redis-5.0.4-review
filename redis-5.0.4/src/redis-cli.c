@@ -3123,6 +3123,7 @@ static int clusterManagerFlushNodeConfig(clusterManagerNode *node, char **err) {
     int is_err = 0, success = 1;
     if (err != NULL) *err = NULL;
     if (node->replicate != NULL) {
+        // 告诉slave，他的master是哪个
         reply = CLUSTER_MANAGER_COMMAND(node, "CLUSTER REPLICATE %s",
                                         node->replicate);
         if (reply == NULL || (is_err = (reply->type == REDIS_REPLY_ERROR))) {
@@ -3549,6 +3550,7 @@ cleanup:
     return signature;
 }
 
+// 查看每个节点的CLUSTER NODE信息，是否都是一致的
 static int clusterManagerIsConfigConsistent(void) {
     if (cluster_manager.nodes == NULL) return 0;
     int consistent = (listLength(cluster_manager.nodes) <= 1);
@@ -4790,6 +4792,8 @@ assign_replicas:
             clusterManagerNode *node = ln->value;
             char *err = NULL;
             // CLUSTER REPLICATE %
+            // 如果是从，就执行CLUSTER REPLICATE
+            // 主就添加slot
             int flushed = clusterManagerFlushNodeConfig(node, &err);
             if (!flushed && node->dirty && !node->replicate) {
                 if (err != NULL) {
@@ -4803,6 +4807,8 @@ assign_replicas:
         clusterManagerLogInfo(">>> Nodes configuration updated\n");
         clusterManagerLogInfo(">>> Assign a different config epoch to "
                               "each node\n");
+
+        // 配置集群的config_epoch
         int config_epoch = 1;
         listRewind(cluster_manager.nodes, &li);
         while ((ln = listNext(&li)) != NULL) {
@@ -4815,6 +4821,9 @@ assign_replicas:
         }
         clusterManagerLogInfo(">>> Sending CLUSTER MEET messages to join "
                               "the cluster\n");
+
+        // 发送meet信息
+        // 注意，像集群中的所有节点，只发送第一个服务的信息即可
         clusterManagerNode *first = NULL;
         listRewind(cluster_manager.nodes, &li);
         while ((ln = listNext(&li)) != NULL) {
@@ -4844,8 +4853,11 @@ assign_replicas:
          * waiting for cluster join will find all the nodes agree about
          * the config as they are still empty with unassigned slots. */
         sleep(1);
+        // 查看每个节点的CLUSTER NODE信息，是否都是一致的
         clusterManagerWaitForClusterJoin();
+        
         /* Useful for the replicas */
+        // 再次重新设置master的slot，还有告诉slave那个是他的master
         listRewind(cluster_manager.nodes, &li);
         while ((ln = listNext(&li)) != NULL) {
             clusterManagerNode *node = ln->value;
